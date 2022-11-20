@@ -1,7 +1,6 @@
 package io.github.takusan23.arcoregithubskyline
 
 import android.app.Activity
-import android.widget.Toast
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import com.google.ar.core.ArCoreApk
@@ -43,7 +42,6 @@ class ARCoreSessionLifecycleHelper(
     private fun tryCreateSession(): Session? {
         // 権限がなければreturn
         if (!CameraPermissionHelper.hasCameraPermission(activity)) {
-            CameraPermissionHelper.requestCameraPermission(activity)
             return null
         }
 
