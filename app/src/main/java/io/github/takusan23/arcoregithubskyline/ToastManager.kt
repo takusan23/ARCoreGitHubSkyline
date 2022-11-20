@@ -23,6 +23,7 @@ class ToastManager(private val context: Context) {
         }
         handler.post {
             Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+            prevMessage = message
         }
     }
 }

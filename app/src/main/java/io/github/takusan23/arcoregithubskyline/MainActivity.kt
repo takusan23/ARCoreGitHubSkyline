@@ -66,6 +66,7 @@ class MainActivity : AppCompatActivity() {
         }
         lifecycle.addObserver(arCoreSessionLifecycleHelper)
         lifecycle.addObserver(arViewLifecycle)
+        lifecycle.addObserver(renderer)
 
         // 描画する
         SampleRender(arViewLifecycle.viewBinding.activityMainGlSurfaceview, renderer, assets)
