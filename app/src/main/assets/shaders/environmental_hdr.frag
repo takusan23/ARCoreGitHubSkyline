@@ -48,9 +48,8 @@ precision mediump float;
 // Number of mipmap levels in the filtered cubemap.
 const int kNumberOfRoughnessLevels = NUMBER_OF_MIPMAP_LEVELS;
 
-// The albedo and roughness/metallic textures.
-uniform sampler2D u_AlbedoTexture;
-uniform sampler2D u_RoughnessMetallicAmbientOcclusionTexture;
+// ここで3Dオブジェクトの色を定義しておく
+uniform vec4 v_ObjColor;
 
 // The intensity of the main directional light.
 uniform vec3 u_LightIntensity;
@@ -216,14 +215,12 @@ void Pbr_CreateShadingParameters(const in vec3 viewNormal,
 }
 
 void Pbr_CreateMaterialParameters(const in vec2 texCoord,
-                                  const in sampler2D albedoTexture,
-                                  const in sampler2D pbrTexture,
                                   const in sampler2D dfgTexture,
                                   const in ShadingParameters shading,
                                   out MaterialParameters material) {
   // Read the material parameters from the textures
-  vec3 albedo = texture(albedoTexture, texCoord).rgb;
-  vec3 roughnessMetallicAmbientOcclusion = texture(pbrTexture, texCoord).rgb;
+  vec3 albedo = v_ObjColor.rgb;
+  vec3 roughnessMetallicAmbientOcclusion = v_ObjColor.rgb;
   // Roughness inputs are perceptually linear; convert them to regular roughness
   // values. Roughness levels approaching 0 will make specular reflections
   // completely invisible, so cap the lower bound. This value was chosen such
@@ -270,7 +267,7 @@ void main() {
 
   // Skip all lighting calculations if the estimation is not valid.
   if (!u_LightEstimateIsValid) {
-    o_FragColor = vec4(texture(u_AlbedoTexture, texCoord).rgb, 1.0);
+    o_FragColor = v_ObjColor;
     return;
   }
 
@@ -279,9 +276,7 @@ void main() {
                               u_ViewLightDirection, u_ViewInverse, shading);
 
   MaterialParameters material;
-  Pbr_CreateMaterialParameters(texCoord, u_AlbedoTexture,
-                               u_RoughnessMetallicAmbientOcclusionTexture,
-                               u_DfgTexture, shading, material);
+  Pbr_CreateMaterialParameters(texCoord, u_DfgTexture, shading, material);
 
   // Combine the radiance contributions of both the main light and environment
   vec3 mainLightRadiance =

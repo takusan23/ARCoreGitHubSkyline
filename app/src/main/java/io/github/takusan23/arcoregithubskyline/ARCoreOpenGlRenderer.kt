@@ -1,6 +1,7 @@
 package io.github.takusan23.arcoregithubskyline
 
 import android.content.Context
+import android.opengl.GLES30
 import android.opengl.Matrix
 import android.util.Log
 import androidx.lifecycle.DefaultLifecycleObserver
@@ -12,7 +13,9 @@ import io.github.takusan23.arcoregithubskyline.common.helpers.TapHelper
 import io.github.takusan23.arcoregithubskyline.common.samplerender.*
 import io.github.takusan23.arcoregithubskyline.common.samplerender.arcore.BackgroundRenderer
 import io.github.takusan23.arcoregithubskyline.common.samplerender.arcore.PlaneRenderer
+import io.github.takusan23.arcoregithubskyline.common.samplerender.arcore.SpecularCubemapFilter
 import java.io.IOException
+import java.nio.ByteBuffer
 
 /** OpenGLを利用して描画するクラス */
 class ARCoreOpenGlRenderer(
@@ -39,6 +42,14 @@ class ARCoreOpenGlRenderer(
 
     /** 最後のポイントクラウド */
     private var lastPointCloudTimestamp = 0L
+
+    /** GitHubのARモデル */
+    private lateinit var virtualObjectMesh: Mesh
+    private lateinit var virtualObjectShader: Shader
+
+    /** ARモデルの環境HDR */
+    private lateinit var dfgTexture: Texture
+    private lateinit var cubemapFilter: SpecularCubemapFilter
 
     /** AR上においたオブジェクト配列 */
     private val wrappedAnchors = mutableListOf<WrappedAnchor>()
@@ -87,6 +98,47 @@ class ARCoreOpenGlRenderer(
         }
         pointCloudVertexBuffer = VertexBuffer(render, /*numberOfEntriesPerVertex=*/ 4, /*entries=*/ null)
         pointCloudMesh = Mesh(render, Mesh.PrimitiveMode.POINTS, /*indexBuffer=*/ null, arrayOf(pointCloudVertexBuffer))
+
+        // HDRの設定
+        cubemapFilter = SpecularCubemapFilter(render, CUBEMAP_RESOLUTION, CUBEMAP_NUMBER_OF_IMPORTANCE_SAMPLES)
+        dfgTexture = Texture(render, Texture.Target.TEXTURE_2D, Texture.WrapMode.CLAMP_TO_EDGE,/*useMipmaps=*/ false)
+
+        // DFT テクスチャの設定
+        val dfgResolution = 64
+        val dfgChannels = 2
+        val halfFloatSize = 2
+        val buffer = ByteBuffer.allocateDirect(dfgResolution * dfgResolution * dfgChannels * halfFloatSize).apply {
+            context.assets.open("models/dfg.raw").use { it.read(this.array()) }
+        }
+
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, dfgTexture.textureId)
+        GLError.maybeThrowGLException("Failed to bind DFG texture", "glBindTexture")
+        GLES30.glTexImage2D(
+            GLES30.GL_TEXTURE_2D,
+            /*level=*/ 0,
+            GLES30.GL_RG16F,
+            /*width=*/ dfgResolution,
+            /*height=*/ dfgResolution,
+            /*border=*/ 0,
+            GLES30.GL_RG,
+            GLES30.GL_HALF_FLOAT,
+            buffer
+        )
+        GLError.maybeThrowGLException("Failed to populate DFG texture", "glTexImage2D")
+
+        // 3Dオブジェクトを読み込む
+        virtualObjectMesh = Mesh.createFromAsset(render, "models/arcore_github_skyline.obj")
+        virtualObjectShader = Shader.createFromAssets(
+            render,
+            "shaders/environmental_hdr.vert",
+            "shaders/environmental_hdr.frag",
+            mapOf("NUMBER_OF_MIPMAP_LEVELS" to cubemapFilter.numberOfMipmapLevels.toString())
+        ).apply {
+            setTexture("u_Cubemap", cubemapFilter.filteredCubemapTexture)
+            setTexture("u_DfgTexture", dfgTexture)
+            // オブジェクトの色をUniform変数に入れる
+            setVec4("v_ObjColor", floatArrayOf(0.25f, 0.76f, 0.38f, 1.0f))
+        }
     }
 
     /** SurfaceViewのサイズ変更時に */
@@ -186,6 +238,24 @@ class ARCoreOpenGlRenderer(
         // 平面を描画します
         planeRenderer.drawPlanes(render, session.getAllTrackables(Plane::class.java), camera.displayOrientedPose, projectionMatrix)
 
+        // シェーダのライティングパラメータを更新
+        updateLightEstimation(frame.lightEstimate, viewMatrix)
+
+        // ARオブジェクトを描画
+        render.clear(virtualSceneFramebuffer, 0f, 0f, 0f, 0f)
+        wrappedAnchors.filter { it.anchor.trackingState == TrackingState.TRACKING }.forEach { (anchor, trackable) ->
+            // アンカーポーズ
+            anchor.pose.toMatrix(modelMatrix, 0)
+            // モデル、ビュー、投影行列 を計算
+            Matrix.multiplyMM(modelViewMatrix, 0, viewMatrix, 0, modelMatrix, 0)
+            Matrix.multiplyMM(modelViewProjectionMatrix, 0, projectionMatrix, 0, modelViewMatrix, 0)
+            // シェーダーのUniform変数にセットする
+            virtualObjectShader.setMat4("u_ModelView", modelViewMatrix)
+            virtualObjectShader.setMat4("u_ModelViewProjection", modelViewProjectionMatrix)
+            // 描画
+            render.draw(virtualObjectMesh, virtualObjectShader, virtualSceneFramebuffer)
+        }
+
         // 背景を使用して仮想シーンを構成します。
         backgroundRenderer.drawVirtualScene(render, virtualSceneFramebuffer, Z_NEAR, Z_FAR)
     }
@@ -219,6 +289,37 @@ class ARCoreOpenGlRenderer(
         }
     }
 
+    /** 光を処理する */
+    private fun updateLightEstimation(lightEstimate: LightEstimate, viewMatrix: FloatArray) {
+        if (lightEstimate.state != LightEstimate.State.VALID) {
+            virtualObjectShader.setBool("u_LightEstimateIsValid", false)
+            return
+        }
+        virtualObjectShader.setBool("u_LightEstimateIsValid", true)
+        Matrix.invertM(viewInverseMatrix, 0, viewMatrix, 0)
+        virtualObjectShader.setMat4("u_ViewInverse", viewInverseMatrix)
+        updateMainLight(
+            lightEstimate.environmentalHdrMainLightDirection,
+            lightEstimate.environmentalHdrMainLightIntensity,
+            viewMatrix
+        )
+        cubemapFilter.update(lightEstimate.acquireEnvironmentalHdrCubeMap())
+    }
+
+    private fun updateMainLight(
+        direction: FloatArray,
+        intensity: FloatArray,
+        viewMatrix: FloatArray,
+    ) {
+        // ビュー空間に変換するための最終コンポーネントとして 0.0 を持つ vec4 の方向が必要です。
+        worldLightDirection[0] = direction[0]
+        worldLightDirection[1] = direction[1]
+        worldLightDirection[2] = direction[2]
+        Matrix.multiplyMV(viewLightDirection, 0, viewMatrix, 0, worldLightDirection, 0)
+        virtualObjectShader.setVec4("u_ViewLightDirection", viewLightDirection)
+        virtualObjectShader.setVec3("u_LightIntensity", intensity)
+    }
+
     /** 平面が1つ以上見つかっていれば true */
     private fun hasTrackingPlane(session: Session) = session.getAllTrackables(Plane::class.java).any { it.trackingState == TrackingState.TRACKING }
 
@@ -233,5 +334,8 @@ class ARCoreOpenGlRenderer(
 
         private const val Z_NEAR = 0.1f
         private const val Z_FAR = 100f
+
+        private const val CUBEMAP_RESOLUTION = 16
+        private const val CUBEMAP_NUMBER_OF_IMPORTANCE_SAMPLES = 32
     }
 }
