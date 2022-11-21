@@ -33,6 +33,11 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(arViewLifecycle.viewBinding.root)
 
+        // ライフサイクル
+        lifecycle.addObserver(arCoreSessionLifecycleHelper)
+        lifecycle.addObserver(arViewLifecycle)
+        lifecycle.addObserver(renderer)
+
         // 権限がない場合は取得する
         if (CameraPermissionHelper.hasCameraPermission(this)) {
             setup()
@@ -64,9 +69,6 @@ class MainActivity : AppCompatActivity() {
                 )
             }
         }
-        lifecycle.addObserver(arCoreSessionLifecycleHelper)
-        lifecycle.addObserver(arViewLifecycle)
-        lifecycle.addObserver(renderer)
 
         // 描画する
         SampleRender(arViewLifecycle.viewBinding.activityMainGlSurfaceview, renderer, assets)

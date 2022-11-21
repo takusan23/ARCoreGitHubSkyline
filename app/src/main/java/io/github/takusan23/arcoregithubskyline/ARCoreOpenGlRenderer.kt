@@ -137,6 +137,7 @@ class ARCoreOpenGlRenderer(
             setTexture("u_Cubemap", cubemapFilter.filteredCubemapTexture)
             setTexture("u_DfgTexture", dfgTexture)
             // オブジェクトの色をUniform変数に入れる
+            // RGBA 0から1まで
             setVec4("v_ObjColor", floatArrayOf(0.25f, 0.76f, 0.38f, 1.0f))
         }
     }
