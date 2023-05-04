@@ -6,11 +6,28 @@ import android.opengl.Matrix
 import android.util.Log
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
-import com.google.ar.core.*
+import com.google.ar.core.Anchor
+import com.google.ar.core.Camera
+import com.google.ar.core.DepthPoint
+import com.google.ar.core.Frame
+import com.google.ar.core.InstantPlacementPoint
+import com.google.ar.core.LightEstimate
+import com.google.ar.core.Plane
+import com.google.ar.core.Point
+import com.google.ar.core.Session
+import com.google.ar.core.Trackable
+import com.google.ar.core.TrackingFailureReason
+import com.google.ar.core.TrackingState
 import com.google.ar.core.exceptions.NotYetAvailableException
 import io.github.takusan23.arcoregithubskyline.common.helpers.DisplayRotationHelper
 import io.github.takusan23.arcoregithubskyline.common.helpers.TapHelper
-import io.github.takusan23.arcoregithubskyline.common.samplerender.*
+import io.github.takusan23.arcoregithubskyline.common.samplerender.Framebuffer
+import io.github.takusan23.arcoregithubskyline.common.samplerender.GLError
+import io.github.takusan23.arcoregithubskyline.common.samplerender.Mesh
+import io.github.takusan23.arcoregithubskyline.common.samplerender.SampleRender
+import io.github.takusan23.arcoregithubskyline.common.samplerender.Shader
+import io.github.takusan23.arcoregithubskyline.common.samplerender.Texture
+import io.github.takusan23.arcoregithubskyline.common.samplerender.VertexBuffer
 import io.github.takusan23.arcoregithubskyline.common.samplerender.arcore.BackgroundRenderer
 import io.github.takusan23.arcoregithubskyline.common.samplerender.arcore.PlaneRenderer
 import io.github.takusan23.arcoregithubskyline.common.samplerender.arcore.SpecularCubemapFilter
@@ -245,8 +262,10 @@ class ARCoreOpenGlRenderer(
         // ARオブジェクトを描画
         render.clear(virtualSceneFramebuffer, 0f, 0f, 0f, 0f)
         wrappedAnchors.filter { it.anchor.trackingState == TrackingState.TRACKING }.forEach { (anchor, trackable) ->
-            // アンカーポーズ
-            anchor.pose.toMatrix(modelMatrix, 0)
+            // 描画のための行列を用意する
+            // TODO extractTranslation を呼ぶと、回転（axis）を除いた行列を返してくれる。呼ばずに Post#toMatrix すると、回転も考慮される
+            // anchor.pose.toMatrix(modelMatrix, 0)
+            anchor.pose.extractTranslation().toMatrix(modelMatrix, 0)
             // モデル、ビュー、投影行列 を計算
             Matrix.multiplyMM(modelViewMatrix, 0, viewMatrix, 0, modelMatrix, 0)
             Matrix.multiplyMM(modelViewProjectionMatrix, 0, projectionMatrix, 0, modelViewMatrix, 0)
